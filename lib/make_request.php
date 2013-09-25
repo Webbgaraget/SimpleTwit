@@ -31,14 +31,53 @@ if (!function_exists('stf_get_api_tweets'))
 		);
 
 		$auth = new tmhOAuth($config);
-
 		$method = 'GET';
-		$url = 'https://api.twitter.com/1.1/statuses/user_timeline.json';
-		$params = array(
-			'screen_name' => $args['screen_name'],
-			'include_rts' => 'true',
-			'exclude_replies' => 'false'
-		);
+
+		$is_multiple = ( false !== strpos( $args['screen_name'], ',' ) );
+
+		if ( ! $is_multiple ) {
+			$url = 'https://api.twitter.com/1.1/statuses/user_timeline.json';
+			$params = array(
+				'screen_name' => $args['screen_name'],
+				'include_rts' => 'true',
+				'exclude_replies' => 'false'
+			);
+		} else {
+			// We're doing a search on multiple screen names or hash tags
+			$url = 'https://api.twitter.com/1.1/search/tweets.json';
+
+			$search_queries = array();
+			foreach ( explode( ',', $args['screen_name'] ) as $query ) {
+				// If the user has separated the screen names with ", " instead of ","
+				$query = trim( $query );
+
+				// Have a look at the first character to distinguish between screen names
+				// and hash tags
+				$initial = substr( $query, 0, 1 );
+				switch ( $initial ) {
+					// Hash tag
+					case '#':
+						$search_queries[] .= $query;
+						break;
+
+					// Screen name, get rid of the @
+					case '@':
+						$search_queries[] .= 'from:' . str_replace( '@', '', $query );
+						break;
+
+					// Assume screen name for anything else
+					default:
+						$search_queries[] .= 'from:' . $query;
+						break;
+				}
+			}
+			$search_query = implode( ' OR ', $search_queries );
+			$search_query = urlencode( $search_query );
+
+			$params = array(
+				'q' => $search_query,
+			);
+		}
 
 		if ($args['limit'] != 0)
 			$params['count'] = $args['limit'];
@@ -50,9 +89,14 @@ if (!function_exists('stf_get_api_tweets'))
 
 		$auth->request($method, $url, $params);
 
-		if ($auth->response['info']['http_code'] == 200)
-			return json_decode($auth->response['response'], true);
-		else
-			return false;
+		if ($auth->response['info']['http_code'] == 200) {
+			$return = json_decode($auth->response['response'], true);
+			if ( $is_multiple )
+				$return = $return['statuses'];
+		} else {
+			$return = false;
+		}
+
+		return $return;
 	}
 }
